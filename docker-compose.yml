@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    container_name: dbmp-v2-backend
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./backend/data:/data
+    ports:
+      - "8420:8420"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: http://localhost:8420
+    container_name: dbmp-v2-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
