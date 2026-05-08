@@ -8,6 +8,8 @@ A self-hostable, security-focused alternative backend for [BeamMP](https://beamm
 ![Stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React-informational)
 ![Docker](https://img.shields.io/badge/deploy-docker--compose-2496ED)
 
+[![See it in action — bmp.musanet.xyz](https://img.shields.io/badge/See%20it%20in%20action-bmp.musanet.xyz-1971c2?style=for-the-badge&logo=react&logoColor=white)](https://bmp.musanet.xyz)
+
 ---
 
 ## Highlights
