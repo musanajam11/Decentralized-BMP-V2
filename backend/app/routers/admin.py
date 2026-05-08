@@ -207,6 +207,74 @@ def update_turnstile_settings(
     return _current_turnstile()
 
 
+# --- Theme / blurred background --------------------------------------------
+
+class ThemeOut(BaseModel):
+    background_url: str
+    background_blur_px: int
+    background_dim_pct: int
+    apply_to_auth_only: bool
+
+
+class ThemeIn(BaseModel):
+    background_url: str | None = None
+    background_blur_px: int | None = Field(default=None, ge=0, le=60)
+    background_dim_pct: int | None = Field(default=None, ge=0, le=90)
+    apply_to_auth_only: bool | None = None
+
+
+def _current_theme() -> ThemeOut:
+    return ThemeOut(
+        background_url=app_settings.background_url(),
+        background_blur_px=app_settings.background_blur_px(),
+        background_dim_pct=app_settings.background_dim_pct(),
+        apply_to_auth_only=app_settings.background_apply_to_auth_only(),
+    )
+
+
+@router.get("/settings/theme", response_model=ThemeOut)
+def get_theme_settings(_: dict = Depends(security.require_admin)) -> ThemeOut:
+    return _current_theme()
+
+
+@router.patch("/settings/theme", response_model=ThemeOut)
+def update_theme_settings(
+    body: ThemeIn,
+    request: Request,
+    admin: dict = Depends(security.require_admin),
+) -> ThemeOut:
+    updates: dict[str, str] = {}
+    if body.background_url is not None:
+        url = body.background_url.strip()
+        # Empty string clears the wallpaper. Anything else must be http(s).
+        if url and not (url.startswith("http://") or url.startswith("https://")):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "background_url must start with http:// or https://",
+            )
+        updates["background_url"] = url
+    if body.background_blur_px is not None:
+        updates["background_blur_px"] = str(body.background_blur_px)
+    if body.background_dim_pct is not None:
+        updates["background_dim_pct"] = str(body.background_dim_pct)
+    if body.apply_to_auth_only is not None:
+        updates["background_apply_to_auth_only"] = (
+            "true" if body.apply_to_auth_only else "false"
+        )
+    if updates:
+        try:
+            app_settings.set_many(updates)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        security.audit(
+            event="admin.settings.theme_updated",
+            user_id=admin["id"], username=admin["username"],
+            request=request, success=True,
+            detail={"changed": sorted(updates.keys())},
+        )
+    return _current_theme()
+
+
 # --- Audit log viewer -------------------------------------------------------
 
 class AuditEventOut(BaseModel):

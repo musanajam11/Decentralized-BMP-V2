@@ -170,6 +170,18 @@ def create_app() -> FastAPI:
             },
         }
 
+    @app.get("/theme")
+    def public_theme() -> dict:
+        """Public — admin-configured wallpaper used by the login form and
+        (optionally) by every signed-in page. Empty `background_url` means
+        the feature is disabled."""
+        return {
+            "background_url": app_settings.background_url(),
+            "background_blur_px": app_settings.background_blur_px(),
+            "background_dim_pct": app_settings.background_dim_pct(),
+            "apply_to_auth_only": app_settings.background_apply_to_auth_only(),
+        }
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"status": "ok", "version": app.version}

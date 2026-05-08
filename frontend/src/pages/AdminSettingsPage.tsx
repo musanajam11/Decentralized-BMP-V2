@@ -5,19 +5,22 @@ import {
   Button,
   Card,
   Group,
+  Image,
   NumberInput,
   PasswordInput,
   Select,
+  Slider,
   Stack,
   Switch,
   Text,
   TextInput,
   Title,
 } from "@mantine/core";
-import { IconDeviceFloppy, IconInfoCircle, IconShieldCheck } from "@tabler/icons-react";
+import { IconDeviceFloppy, IconInfoCircle, IconPhoto, IconShieldCheck } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { notifications } from "@mantine/notifications";
 import { api, ApiError } from "../api";
+import { THEME_QUERY_KEY, type ThemeConfig } from "../themeBg";
 
 interface AppSettings {
   open_registration: boolean;
@@ -147,6 +150,7 @@ export function AdminSettingsPage() {
       </Group>
 
       <TurnstilePanel />
+      <ThemePanel />
     </Stack>
   );
 }
@@ -301,6 +305,197 @@ function TurnstilePanel() {
             Save Turnstile settings
           </Button>
         </Group>
+      </Stack>
+    </Card>
+  );
+}
+
+
+function ThemePanel() {
+  const qc = useQueryClient();
+  const q = useQuery<ThemeConfig>({
+    queryKey: THEME_QUERY_KEY,
+    queryFn: () => api.get("/theme"),
+  });
+
+  const [url, setUrl] = useState("");
+  const [blur, setBlur] = useState(14);
+  const [dim, setDim] = useState(45);
+  const [authOnly, setAuthOnly] = useState(false);
+
+  useEffect(() => {
+    if (q.data) {
+      setUrl(q.data.background_url);
+      setBlur(q.data.background_blur_px);
+      setDim(q.data.background_dim_pct);
+      setAuthOnly(q.data.apply_to_auth_only);
+    }
+  }, [q.data]);
+
+  const save = useMutation({
+    mutationFn: (body: Partial<ThemeConfig> & { background_url?: string }) =>
+      api.patch<ThemeConfig>("/admin/settings/theme", body),
+    onSuccess: (data) => {
+      qc.setQueryData(THEME_QUERY_KEY, data);
+      notifications.show({ color: "green", message: "Theme saved" });
+    },
+    onError: (err) =>
+      notifications.show({
+        color: "red",
+        title: "Save failed",
+        message: err instanceof ApiError ? err.detail : "unknown error",
+      }),
+  });
+
+  if (!q.data) return null;
+
+  const dirty =
+    url.trim() !== q.data.background_url ||
+    blur !== q.data.background_blur_px ||
+    dim !== q.data.background_dim_pct ||
+    authOnly !== q.data.apply_to_auth_only;
+
+  // Brightness factor used by the live preview — mirrors the formula in
+  // `themeBg.applyThemeVars` so what the admin sees matches what the user
+  // will see after save.
+  const brightness = Math.max(0.1, 1 - dim / 100);
+
+  return (
+    <Card withBorder radius="md" p="lg">
+      <Stack>
+        <Group justify="space-between">
+          <Group gap="xs">
+            <IconPhoto size={20} />
+            <Title order={4}>Background wallpaper</Title>
+          </Group>
+          {q.data.background_url ? (
+            <Badge color="green" variant="light">Active</Badge>
+          ) : (
+            <Badge color="gray" variant="light">Disabled</Badge>
+          )}
+        </Group>
+        <Text size="sm" c="dimmed">
+          Renders a blurred image (PNG / JPG / GIF) behind the login form
+          and, optionally, behind every signed-in page. Hosted images only —
+          paste a public <code>https://</code> URL. Leave blank to disable.
+        </Text>
+
+        <TextInput
+          label="Image URL"
+          placeholder="https://example.com/wallpaper.jpg"
+          value={url}
+          onChange={(e) => setUrl(e.currentTarget.value)}
+          spellCheck={false}
+          autoComplete="off"
+        />
+
+        <Stack gap={4}>
+          <Group justify="space-between">
+            <Text size="sm" fw={500}>Blur radius</Text>
+            <Text size="xs" c="dimmed">{blur}px</Text>
+          </Group>
+          <Slider
+            min={0}
+            max={40}
+            step={1}
+            value={blur}
+            onChange={setBlur}
+            marks={[
+              { value: 0, label: "0" },
+              { value: 14, label: "14" },
+              { value: 40, label: "40" },
+            ]}
+          />
+        </Stack>
+
+        <Stack gap={4}>
+          <Group justify="space-between">
+            <Text size="sm" fw={500}>Darken</Text>
+            <Text size="xs" c="dimmed">{dim}%</Text>
+          </Group>
+          <Slider
+            min={0}
+            max={90}
+            step={1}
+            value={dim}
+            onChange={setDim}
+            marks={[
+              { value: 0, label: "0%" },
+              { value: 45, label: "45%" },
+              { value: 90, label: "90%" },
+            ]}
+          />
+        </Stack>
+
+        <Switch
+          label="Show wallpaper on the login page only"
+          description="When off, the same blurred backdrop is also rendered behind every signed-in page."
+          checked={authOnly}
+          onChange={(e) => setAuthOnly(e.currentTarget.checked)}
+        />
+
+        {url.trim() && (
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>Preview</Text>
+            <div
+              style={{
+                position: "relative",
+                height: 160,
+                borderRadius: 8,
+                overflow: "hidden",
+                border: "1px solid var(--mantine-color-default-border)",
+              }}
+            >
+              <Image
+                src={url}
+                fit="cover"
+                h={160}
+                w="100%"
+                style={{
+                  filter: `blur(${blur}px) brightness(${brightness})`,
+                  transform: "scale(1.1)",
+                }}
+                fallbackSrc=""
+              />
+            </div>
+          </Stack>
+        )}
+
+        <Group>
+          <Button
+            leftSection={<IconDeviceFloppy size={16} />}
+            loading={save.isPending}
+            disabled={!dirty}
+            onClick={() =>
+              save.mutate({
+                background_url: url.trim(),
+                background_blur_px: blur,
+                background_dim_pct: dim,
+                apply_to_auth_only: authOnly,
+              })
+            }
+          >
+            Save background
+          </Button>
+          <Button
+            variant="subtle"
+            disabled={!dirty}
+            onClick={() => {
+              if (!q.data) return;
+              setUrl(q.data.background_url);
+              setBlur(q.data.background_blur_px);
+              setDim(q.data.background_dim_pct);
+              setAuthOnly(q.data.apply_to_auth_only);
+            }}
+          >
+            Discard
+          </Button>
+        </Group>
+
+        <Alert variant="light" color="blue" icon={<IconInfoCircle />}>
+          The image is loaded directly by each visitor's browser, so make
+          sure the host allows hot-linking and serves over HTTPS.
+        </Alert>
       </Stack>
     </Card>
   );

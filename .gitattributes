@@ -1,0 +1,6 @@
+# Force LF for shell scripts and other Unix-targeted files so Windows
+# checkouts don't break Linux containers / CI runners.
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile text eol=lf

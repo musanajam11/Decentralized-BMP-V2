@@ -48,6 +48,18 @@ DEFAULTS: dict[str, str] = {
     # After N consecutive bad logins the account is locked for M minutes.
     "lockout_max_failures": "10",
     "lockout_minutes": "15",
+
+    # --- Theme / blurred background (admin-tunable) ---
+    # Empty URL disables the background entirely.
+    "background_url": "",
+    # CSS pixels of `filter: blur()` applied to the wallpaper layer.
+    "background_blur_px": "14",
+    # 0 = no dimming, 100 = fully black. Translated client-side to a
+    # CSS brightness() factor.
+    "background_dim_pct": "45",
+    # "true" = only show the wallpaper on the /login page; "false" = also
+    # behind every signed-in page.
+    "background_apply_to_auth_only": "false",
 }
 
 
@@ -182,3 +194,27 @@ def lockout_policy() -> tuple[int, int]:
     except ValueError:
         mins = 15
     return max_f, mins * 60
+
+
+# --- Theme / blurred background --------------------------------------------
+
+def background_url() -> str:
+    return get("background_url").strip()
+
+
+def background_blur_px() -> int:
+    try:
+        return max(0, min(60, int(get("background_blur_px"))))
+    except ValueError:
+        return 14
+
+
+def background_dim_pct() -> int:
+    try:
+        return max(0, min(90, int(get("background_dim_pct"))))
+    except ValueError:
+        return 45
+
+
+def background_apply_to_auth_only() -> bool:
+    return _coerce_bool(get("background_apply_to_auth_only"))

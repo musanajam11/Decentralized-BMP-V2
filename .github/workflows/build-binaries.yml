@@ -1,0 +1,283 @@
+name: build-binaries
+
+# Builds patched BeamMP-Server (Linux + Windows) and BeamMP-Launcher (Windows)
+# from upstream source on every release tag of either upstream repo, on a
+# daily schedule, and on demand. Patched binaries are published to a single
+# rolling pre-release on this repo (tag: binaries-latest) so the backend
+# can fetch them with stable URLs at deploy time.
+#
+# Source patches are minimal and live under patches/. They route the
+# backend host through a runtime env var (BMP_BACKEND_HOST for the server,
+# BMP_BACKEND_URL for the launcher), preserving vanilla behaviour when the
+# vars are unset.
+
+on:
+  schedule:
+    # Once a day at 04:17 UTC. Cheap on Actions minutes thanks to vcpkg cache.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      server_ref:
+        description: "BeamMP-Server git ref (default: latest release tag)"
+        required: false
+        default: ""
+      launcher_ref:
+        description: "BeamMP-Launcher git ref (default: latest release tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write   # required for the rolling release publish step
+
+env:
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  CMAKE_BUILD_TYPE: "Release"
+  DEBIAN_FRONTEND: "noninteractive"
+  SERVER_REPO: BeamMP/BeamMP-Server
+  LAUNCHER_REPO: BeamMP/BeamMP-Launcher
+
+jobs:
+  resolve-refs:
+    name: Resolve upstream refs
+    runs-on: ubuntu-22.04
+    outputs:
+      server_ref: ${{ steps.r.outputs.server_ref }}
+      launcher_ref: ${{ steps.r.outputs.launcher_ref }}
+    steps:
+      - id: r
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          server_input='${{ github.event.inputs.server_ref }}'
+          launcher_input='${{ github.event.inputs.launcher_ref }}'
+
+          if [ -n "${server_input}" ]; then
+            server_ref="${server_input}"
+          else
+            server_ref=$(gh api repos/${SERVER_REPO}/releases/latest --jq .tag_name)
+          fi
+          if [ -n "${launcher_input}" ]; then
+            launcher_ref="${launcher_input}"
+          else
+            launcher_ref=$(gh api repos/${LAUNCHER_REPO}/releases/latest --jq .tag_name)
+          fi
+
+          echo "server_ref=${server_ref}"   >> "$GITHUB_OUTPUT"
+          echo "launcher_ref=${launcher_ref}" >> "$GITHUB_OUTPUT"
+          echo "::notice::server=${server_ref} launcher=${launcher_ref}"
+
+  server-linux:
+    name: BeamMP-Server (Debian 12 x86_64)
+    needs: resolve-refs
+    runs-on: ubuntu-22.04
+    container:
+      image: debian:12
+    steps:
+      - name: Install host tools
+        run: |
+          apt-get update -y
+          apt-get install -y git python3 ca-certificates curl
+      - name: Checkout this repo (for patches)
+        uses: actions/checkout@v4
+        with:
+          path: dbmp-v2
+      - name: Checkout BeamMP-Server
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SERVER_REPO }}
+          ref: ${{ needs.resolve-refs.outputs.server_ref }}
+          submodules: recursive
+          fetch-depth: 0
+          path: BeamMP-Server
+      - name: Apply Decentralized-BMP-V2 patch
+        working-directory: BeamMP-Server
+        run: bash ../dbmp-v2/patches/apply-server-patch.sh
+      - name: get-cmake
+        uses: lukka/get-cmake@v3.28.1
+      - name: Export GHA cache vars (for vcpkg x-gha)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Install build deps
+        working-directory: BeamMP-Server
+        run: bash ./scripts/debian-12/1-install-deps.sh
+      - name: Git config safe directory
+        working-directory: BeamMP-Server
+        run: bash ./scripts/debian-12/1.5-git-safe.sh
+      - name: Configure
+        working-directory: BeamMP-Server
+        run: bash ./scripts/debian-12/2-configure.sh '-DCMAKE_TOOLCHAIN_FILE=./vcpkg/scripts/buildsystems/vcpkg.cmake'
+      - name: Build
+        working-directory: BeamMP-Server
+        run: bash ./scripts/debian-12/3-build.sh
+      - name: Stage artifact
+        run: |
+          mkdir -p out
+          cp BeamMP-Server/bin/BeamMP-Server out/BeamMP-Server.debian.12.x86_64
+          chmod +x out/BeamMP-Server.debian.12.x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BeamMP-Server.debian.12.x86_64
+          path: out/BeamMP-Server.debian.12.x86_64
+          if-no-files-found: error
+
+  server-windows:
+    name: BeamMP-Server (Windows x86_64)
+    needs: resolve-refs
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+    steps:
+      - name: Checkout this repo (for patches)
+        uses: actions/checkout@v4
+        with:
+          path: dbmp-v2
+      - name: Checkout BeamMP-Server
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SERVER_REPO }}
+          ref: ${{ needs.resolve-refs.outputs.server_ref }}
+          submodules: recursive
+          fetch-depth: 0
+          path: BeamMP-Server
+      - name: Apply Decentralized-BMP-V2 patch
+        shell: bash
+        working-directory: BeamMP-Server
+        run: bash ../dbmp-v2/patches/apply-server-patch.sh
+      - name: Export GHA cache vars (for vcpkg x-gha)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          runVcpkgInstall: true
+          vcpkgJsonGlob: BeamMP-Server/vcpkg.json
+      - name: Configure
+        shell: bash
+        working-directory: BeamMP-Server
+        run: bash ./scripts/windows/1-configure.sh
+      - name: Build
+        shell: bash
+        working-directory: BeamMP-Server
+        run: bash ./scripts/windows/2-build.sh
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p out
+          cp BeamMP-Server/bin/Release/BeamMP-Server.exe out/BeamMP-Server.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BeamMP-Server.exe
+          path: out/BeamMP-Server.exe
+          if-no-files-found: error
+
+  launcher-windows:
+    name: BeamMP-Launcher (Windows x86_64)
+    needs: resolve-refs
+    runs-on: windows-latest
+    env:
+      VCPKG_DEFAULT_TRIPLET: x64-windows-static
+    steps:
+      - name: Checkout this repo (for patches)
+        uses: actions/checkout@v4
+        with:
+          path: dbmp-v2
+      - name: Checkout BeamMP-Launcher
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LAUNCHER_REPO }}
+          ref: ${{ needs.resolve-refs.outputs.launcher_ref }}
+          submodules: recursive
+          fetch-depth: 0
+          path: BeamMP-Launcher
+      - name: Apply Decentralized-BMP-V2 patch
+        shell: bash
+        working-directory: BeamMP-Launcher
+        run: bash ../dbmp-v2/patches/apply-launcher-patch.sh
+      - name: Export GHA cache vars (for vcpkg x-gha)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          runVcpkgInstall: true
+          vcpkgJsonGlob: BeamMP-Launcher/vcpkg.json
+      - name: Configure
+        shell: bash
+        working-directory: BeamMP-Launcher
+        run: |
+          cmake -B build-windows \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static
+      - name: Build
+        shell: bash
+        working-directory: BeamMP-Launcher
+        run: cmake --build build-windows --config Release
+      - name: Stage artifact
+        shell: bash
+        working-directory: BeamMP-Launcher
+        run: |
+          mkdir -p ../out
+          cp build-windows/Release/BeamMP-Launcher.exe ../out/BeamMP-Launcher.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BeamMP-Launcher.exe
+          path: out/BeamMP-Launcher.exe
+          if-no-files-found: error
+
+  publish:
+    name: Publish rolling release
+    needs:
+      - resolve-refs
+      - server-linux
+      - server-windows
+      - launcher-windows
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release
+          cp artifacts/BeamMP-Server.debian.12.x86_64/BeamMP-Server.debian.12.x86_64 release/
+          cp artifacts/BeamMP-Server.exe/BeamMP-Server.exe release/
+          cp artifacts/BeamMP-Launcher.exe/BeamMP-Launcher.exe release/
+          ( cd release && sha256sum * > SHA256SUMS )
+          ls -la release
+      - name: Replace rolling pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVER_REF: ${{ needs.resolve-refs.outputs.server_ref }}
+          LAUNCHER_REF: ${{ needs.resolve-refs.outputs.launcher_ref }}
+        run: |
+          set -eu
+          tag="binaries-latest"
+          notes="Rolling build of patched binaries.
+
+          - BeamMP-Server: \`${SERVER_REF}\` (upstream: ${SERVER_REPO})
+          - BeamMP-Launcher: \`${LAUNCHER_REF}\` (upstream: ${LAUNCHER_REPO})
+
+          Patched to honour \`BMP_BACKEND_HOST\` (server) and
+          \`BMP_BACKEND_URL\` (launcher) env vars at runtime."
+
+          # Delete and recreate so assets always reflect the most recent run.
+          gh release delete "${tag}" --yes --cleanup-tag || true
+          gh release create "${tag}" \
+            --prerelease \
+            --title "Patched BeamMP binaries (rolling)" \
+            --notes "${notes}" \
+            release/*

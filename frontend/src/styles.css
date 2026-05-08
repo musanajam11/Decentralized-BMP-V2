@@ -1,0 +1,77 @@
+/* Global styles for Decentralized-BMP V2.
+ *
+ * Theme variables are seeded with sensible fallbacks here and then
+ * overwritten at runtime by `useApplyTheme()` once the admin's wallpaper
+ * settings have been fetched from /theme. */
+:root {
+  /* Empty `none` means no background image is rendered. The runtime hook
+   * rewrites this to a real `url("…")` once the admin configures one. */
+  --bg-image: none;
+  --bg-blur: 14px;
+  --bg-brightness: 0.55;
+}
+
+/* Login / sign-up screen: blurred wallpaper behind the form card. The
+ * image lives on a pseudo-element so the blur radius cannot bleed into
+ * the form itself. */
+.auth-bg {
+  position: relative;
+  min-height: 100dvh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.auth-bg::before {
+  content: '';
+  position: absolute;
+  inset: -40px; /* expand so the blurred edge isn't visible */
+  background-image: var(--bg-image);
+  background-size: cover;
+  background-position: center;
+  filter: blur(var(--bg-blur)) brightness(var(--bg-brightness));
+  z-index: 0;
+  pointer-events: none;
+}
+
+.auth-bg > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Logged-in pages: same blurred wallpaper as a fixed full-viewport
+ * backdrop. Toggled by adding the `app-bg-on` class to <body> in App.tsx
+ * so it can be turned off when the admin restricts the background to
+ * the auth screen only. */
+body.app-bg-on::before {
+  content: '';
+  position: fixed;
+  inset: -40px;
+  background-image: var(--bg-image);
+  background-size: cover;
+  background-position: center;
+  filter: blur(var(--bg-blur)) brightness(var(--bg-brightness));
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Make the Mantine AppShell surfaces translucent so the wallpaper shows
+ * through. Without this the shell would just paint its solid theme
+ * background over the image. */
+body.app-bg-on .mantine-AppShell-header,
+body.app-bg-on .mantine-AppShell-navbar,
+body.app-bg-on .mantine-AppShell-main {
+  background-color: rgba(20, 22, 28, 0.55) !important;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* Center the Cloudflare Turnstile widget inside the auth card. The
+ * widget renders into a fixed-size iframe; centering its wrapper puts
+ * the whole challenge inline with the rest of the form. */
+.turnstile-wrap {
+  display: flex;
+  justify-content: center;
+}

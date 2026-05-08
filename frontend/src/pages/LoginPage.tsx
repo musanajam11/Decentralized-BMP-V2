@@ -101,8 +101,9 @@ export function LoginPage() {
   };
 
   return (
-    <Center mih="100dvh" p="md">
-      <Paper p="xl" radius="lg" withBorder maw={420} w="100%">
+    <div className="auth-bg">
+      <Center mih="100dvh" p="md" w="100%">
+        <Paper p="xl" radius="lg" withBorder maw={420} w="100%">
         <Stack gap="md">
           <Center>
             <Image src="/cm-logo.png" h={88} w={88} fit="contain" radius="md" />
@@ -153,12 +154,14 @@ export function LoginPage() {
             />
           )}
           {captchaRequired && siteKey && (
-            <Turnstile
-              key={tab ?? "login"}
-              siteKey={siteKey}
-              onToken={setTurnstileToken}
-              onExpire={() => setTurnstileToken("")}
-            />
+            <div className="turnstile-wrap">
+              <Turnstile
+                key={tab ?? "login"}
+                siteKey={siteKey}
+                onToken={setTurnstileToken}
+                onExpire={() => setTurnstileToken("")}
+              />
+            </div>
           )}
           <Button
             onClick={submit}
@@ -171,5 +174,6 @@ export function LoginPage() {
         </Stack>
       </Paper>
     </Center>
+    </div>
   );
 }

@@ -94,7 +94,7 @@ Decentralized-BMP-V2/
 │   │                         publish, oauth, beammp, builds, compat_v1
 │   ├── scripts/
 │   │   ├── entrypoint.sh
-│   │   └── fetch_builds.sh   Downloads + hex-patches BeamMP binaries
+│   │   └── fetch_builds.sh   Downloads patched BeamMP binaries from rolling release
 │   └── Dockerfile
 ├── frontend/                 Vite + React + Mantine SPA
 │   ├── src/
@@ -161,14 +161,25 @@ All settings come from `.env`. See [`.env.example`](.env.example) for the full a
 
 ## Upgrading the BeamMP binaries
 
-The version string the launcher sees (`/v/s`) and the binaries served from `/builds/launcher` and `/builds/client` are decoupled from the FastAPI app. To support a newer official BeamMP-Server / Launcher release:
+The version string the launcher sees (`/v/s`) and the binaries served from `/builds/launcher` and `/builds/client` are decoupled from the FastAPI app.
 
-1. Drop the new binary into `backend/data/builds/` (or let `scripts/fetch_builds.sh` pull it).
+Patched server and launcher binaries are produced by [`.github/workflows/build-binaries.yml`](.github/workflows/build-binaries.yml), which:
+
+- Resolves the latest release tag from `BeamMP/BeamMP-Server` and `BeamMP/BeamMP-Launcher`.
+- Clones each repo at that tag and applies [`patches/apply-server-patch.sh`](patches/apply-server-patch.sh) / [`patches/apply-launcher-patch.sh`](patches/apply-launcher-patch.sh). The patches replace hardcoded backend hostnames with reads of `BMP_BACKEND_HOST` (server) and `BMP_BACKEND_URL` (launcher); behaviour is vanilla when the vars are unset.
+- Builds via the upstream CMake/vcpkg toolchains (Linux Debian 12 + Windows for the server, Windows for the launcher).
+- Publishes all artifacts to a single rolling pre-release on this repo (`binaries-latest`).
+
+`backend/scripts/fetch_builds.sh` runs on container start and pulls those artifacts into `/data/builds/`. To upgrade:
+
+1. Trigger the **build-binaries** workflow (or wait for the daily cron) so a fresh `binaries-latest` is published.
 2. Bump `LAUNCHER_VERSION` / `SERVER_VERSION` in `.env`.
 3. If the upstream protocol changed, add a new `backend/app/compat/v_<version>.py` adapter and point `COMPAT_PROFILE` at it.
-4. `docker compose restart backend`.
+4. `docker compose restart backend` (set `BUILDS_FORCE_REFETCH=1` to re-pull existing files).
 
 No image rebuild is needed for binary-only updates.
+
+Operators running the patched binaries directly must export the matching env var, e.g. `BMP_BACKEND_HOST=bmp.musanet.xyz` for the server or `BMP_BACKEND_URL=https://bmp.musanet.xyz` for the launcher.
 
 
 ---
