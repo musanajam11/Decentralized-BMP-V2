@@ -1,8 +1,8 @@
 # Decentralized-BMP V2
 
-A self-hostable, security-focused replacement backend for [BeamMP](https://beammp.com) — the multiplayer mod for BeamNG.drive — designed to be discovered through the [BeamNG Mod Registry (BMR)](https://bmr.musanet.xyz) by clients such as [BeamNG Content Manager](https://bmr.musanet.xyz).
+A self-hostable, security-focused alternative backend for [BeamMP](https://beammp.com) — the multiplayer mod for BeamNG.drive — designed to be discovered through the [BeamNG Mod Registry (BMR)](https://bmr.musanet.xyz) by clients such as [BeamNG Content Manager](https://bmr.musanet.xyz).
 
-> **Why?** BeamMP's official infrastructure is a single point of failure and a single point of trust. V2 lets anyone run their own backend, keep their own users, and (optionally) be listed on a community index that Content Manager can browse — without ever giving up control of the server.
+> **Why?** Run your own BeamMP backend with your own users, your own keys, and your own moderation policy — and (optionally) have it listed on a community index that Content Manager can browse, without giving up control of the server.
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 ![Stack](https://img.shields.io/badge/stack-FastAPI%20%2B%20React-informational)
