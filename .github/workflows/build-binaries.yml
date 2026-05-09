@@ -206,11 +206,19 @@ jobs:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-      - name: Setup vcpkg
+      - name: Setup vcpkg (classic mode)
+        # BeamMP-Launcher's vcpkg.json is classic-mode (no builtin-baseline),
+        # so we install dependencies explicitly with a pinned commit instead
+        # of letting run-vcpkg consume the manifest.
         uses: lukka/run-vcpkg@v11
         with:
-          runVcpkgInstall: true
-          vcpkgJsonGlob: BeamMP-Launcher/vcpkg.json
+          vcpkgGitCommitId: "5bf0c55239da398b8c6f450818c9e28d36bf9966"
+          runVcpkgInstall: false
+      - name: Install launcher deps
+        shell: bash
+        run: |
+          "${VCPKG_ROOT}/vcpkg" install --triplet x64-windows-static \
+            cpp-httplib nlohmann-json zlib openssl curl
       - name: Configure
         shell: bash
         working-directory: BeamMP-Launcher

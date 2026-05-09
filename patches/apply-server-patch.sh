@@ -2,95 +2,138 @@
 # Decentralized-BMP V2 — patch BeamMP-Server source for configurable backend.
 #
 # Run from the root of a freshly checked-out BeamMP/BeamMP-Server source tree.
-# Replaces the three hard-coded host getters in include/Common.h so the binary
-# routes auth / heartbeat / socket.io to whatever host is set in the
-# BMP_BACKEND_HOST env var at runtime, falling back to the official
-# beammp.com hosts when the var is unset (preserves vanilla behaviour).
+# Adds a tiny helper header `include/_DBMP_BackendUrl.h` exposing
 #
-# This is the smallest possible source change — touches one file, no new
-# headers, no CMakeLists changes. If upstream renames or moves these
-# functions the script exits non-zero and CI fails loudly.
+#   std::string dbmp::backend_url();   // "https://${BMP_BACKEND_HOST}" or "https://backend.beammp.com"
+#   std::string dbmp::auth_url();      // "https://${BMP_BACKEND_HOST}" or "https://auth.beammp.com"
+#
+# then literal-replaces every occurrence of "https://backend.beammp.com"
+# and "https://auth.beammp.com" in src/ and include/ with calls to those
+# helpers. With BMP_BACKEND_HOST unset the binary behaves identically to
+# the upstream release; with it set, all backend traffic is redirected.
+#
+# Why literal substitution instead of function-body regex: upstream
+# refactors these getters between releases (added/removed backups,
+# scheme moved into the literal, etc.). A literal-by-literal sweep is
+# resilient against those rearrangements.
 
 set -euo pipefail
 
-target="include/Common.h"
-
-if [[ ! -f "${target}" ]]; then
-  echo "::error::Common.h not found at ${target} — upstream layout changed?" >&2
+if [[ ! -f "include/Common.h" ]]; then
+  echo "::error::include/Common.h not found — upstream layout changed?" >&2
   exit 1
 fi
 
-# Python edits are easier to verify than sed for multi-line replacements and
-# we get a real exit code if the markers we're looking for vanish.
-python3 - "${target}" <<'PY'
-import pathlib, re, sys
+# 1. Drop the helper header.
+mkdir -p include
+cat > include/_DBMP_BackendUrl.h <<'HEADER'
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Decentralized-BMP V2 — runtime-configurable backend URL helpers.
+//
+// Reads BMP_BACKEND_HOST at every call (cheap; fallback once cached).
+// Two helpers because upstream traditionally split auth and main backend
+// onto separate hosts — we redirect both to the same operator host.
+#pragma once
 
-p = pathlib.Path(sys.argv[1])
+#include <cstdlib>
+#include <string>
+
+namespace dbmp {
+
+inline std::string _host(const char* fallback) {
+    const char* env = std::getenv("BMP_BACKEND_HOST");
+    if (env && env[0] != '\0') {
+        return std::string("https://") + env;
+    }
+    return std::string("https://") + fallback;
+}
+
+inline std::string backend_url() { return _host("backend.beammp.com"); }
+inline std::string auth_url()    { return _host("auth.beammp.com"); }
+
+} // namespace dbmp
+HEADER
+echo "[patch] wrote include/_DBMP_BackendUrl.h"
+
+# 2. Inject the include into Common.h (where most of the literals live).
+python3 - <<'PY'
+import pathlib, sys
+p = pathlib.Path("include/Common.h")
 src = p.read_text(encoding="utf-8")
-orig = src
-
-# Helper expression embedded once, reused by the three replaced getters.
-helper = (
-    'std::string{ std::getenv("BMP_BACKEND_HOST") '
-    '? std::getenv("BMP_BACKEND_HOST") '
-    ': "{HOST}" }'
-)
-
-replacements = [
-    # Pattern, replacement
-    (
-        re.compile(
-            r'GetBackendUrlsInOrder\(\)\s*\{\s*'
-            r'return\s*\{\s*'
-            r'"backend\.beammp\.com"\s*,\s*'
-            r'"backup1\.beammp\.com"\s*,\s*'
-            r'"backup2\.beammp\.com"\s*\}\s*;\s*\}',
-            re.DOTALL,
-        ),
-        'GetBackendUrlsInOrder() { return { ' + helper.replace("{HOST}", "backend.beammp.com") + ', "backup1.beammp.com", "backup2.beammp.com" }; }',
-    ),
-    (
-        re.compile(
-            r'GetBackendUrlForAuth\(\)\s*\{\s*'
-            r'return\s*"auth\.beammp\.com"\s*;\s*\}'
-        ),
-        'GetBackendUrlForAuth() { return ' + helper.replace("{HOST}", "auth.beammp.com") + '; }',
-    ),
-    (
-        re.compile(
-            r'GetBackendUrlForSocketIO\(\)\s*\{\s*'
-            r'return\s*"https://backend\.beammp\.com"\s*;\s*\}'
-        ),
-        'GetBackendUrlForSocketIO() { return std::string{"https://"} + ' + helper.replace("{HOST}", "backend.beammp.com") + '; }',
-    ),
-]
-
-# Make sure <cstdlib> is available for std::getenv. Most TUs already get it
-# transitively but include it explicitly to be safe.
-if "#include <cstdlib>" not in src:
-    src = src.replace("#pragma once", "#pragma once\n#include <cstdlib>", 1)
-
-failures = []
-for pat, repl in replacements:
-    new, n = pat.subn(repl, src)
-    if n == 0:
-        failures.append(pat.pattern[:80])
-    elif n > 1:
-        failures.append(f"multiple matches for {pat.pattern[:80]}")
-    src = new
-
-if failures:
-    sys.stderr.write("Patch FAILED — markers not found or ambiguous:\n")
-    for f in failures:
-        sys.stderr.write(f"  - {f}\n")
-    sys.exit(2)
-
-if src == orig:
-    sys.stderr.write("Patch produced no changes — already patched?\n")
-    sys.exit(3)
-
-p.write_text(src, encoding="utf-8")
-print(f"[patch] rewrote {p} ({len(orig)} -> {len(src)} bytes)")
+needle = '#include "_DBMP_BackendUrl.h"'
+if needle in src:
+    print("[patch] Common.h already includes _DBMP_BackendUrl.h")
+else:
+    if "#pragma once" not in src:
+        sys.stderr.write("::error::no #pragma once in Common.h\n")
+        sys.exit(1)
+    src = src.replace("#pragma once", '#pragma once\n' + needle, 1)
+    p.write_text(src, encoding="utf-8")
+    print("[patch] injected include into Common.h")
 PY
+
+# 3. Sweep the tree for the two literals and substitute. Limit to .cpp/.h/.hpp
+#    under src/ and include/ to avoid touching docs/tests/CI YAML.
+python3 - <<'PY'
+import pathlib, sys
+
+ROOTS = ["src", "include"]
+LITERALS = {
+    '"https://backend.beammp.com"': 'dbmp::backend_url()',
+    '"https://auth.beammp.com"':    'dbmp::auth_url()',
+}
+
+total = 0
+files_touched = 0
+for root in ROOTS:
+    for path in pathlib.Path(root).rglob("*"):
+        if path.suffix.lower() not in (".cpp", ".h", ".hpp", ".cc", ".cxx"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        new = text
+        local = 0
+        for needle, replacement in LITERALS.items():
+            count = new.count(needle)
+            if count:
+                new = new.replace(needle, replacement)
+                local += count
+        if local:
+            # The replacement uses dbmp:: helpers — make sure the header is
+            # available in this TU. Common.h gets it directly; everything
+            # else gets it via Common.h's transitive include in practice,
+            # but inject defensively if the file doesn't include Common.h.
+            if 'Common.h' not in new and '_DBMP_BackendUrl.h' not in new:
+                # Insert after the first #include or at top.
+                lines = new.splitlines(keepends=True)
+                inserted = False
+                for i, line in enumerate(lines):
+                    if line.startswith("#include"):
+                        lines.insert(i, '#include "_DBMP_BackendUrl.h"\n')
+                        inserted = True
+                        break
+                if not inserted:
+                    lines.insert(0, '#include "_DBMP_BackendUrl.h"\n')
+                new = "".join(lines)
+            path.write_text(new, encoding="utf-8")
+            print(f"[patch] {path}: {local} literal(s) replaced")
+            total += local
+            files_touched += 1
+
+if total == 0:
+    sys.stderr.write("::error::no occurrences of \"https://backend.beammp.com\" or \"https://auth.beammp.com\" found — upstream changed shape?\n")
+    sys.exit(2)
+print(f"[patch] total: {total} substitution(s) across {files_touched} file(s)")
+PY
+
+# 4. Verify nothing slipped through.
+remaining=$(grep -rE '"https://(backend|auth)\.beammp\.com"' src include 2>/dev/null || true)
+if [[ -n "${remaining}" ]]; then
+  echo "::error::leftover literals after patch:" >&2
+  echo "${remaining}" >&2
+  exit 4
+fi
 
 echo "[patch] BeamMP-Server source patched OK"
