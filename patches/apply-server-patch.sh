@@ -28,28 +28,34 @@ fi
 mkdir -p include
 cat > include/_DBMP_BackendUrl.h <<'HEADER'
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// Decentralized-BMP V2 — runtime-configurable backend URL helpers.
+// Decentralized-BMP V2 — backend URL helpers.
 //
-// Reads BMP_BACKEND_HOST at every call (cheap; fallback once cached).
-// Two helpers because upstream traditionally split auth and main backend
-// onto separate hosts — we redirect both to the same operator host.
+// The host is baked in at build time (DBMP_BACKEND_HOST CMake/compile
+// define, default "bmp.musanet.xyz"). At runtime BMP_BACKEND_HOST may
+// override it for one-off testing, but the shipped binary is fully
+// self-contained — operators do not need to set anything to point at
+// the Decentralized-BMP backend.
 #pragma once
 
 #include <cstdlib>
 #include <string>
 
+#ifndef DBMP_BACKEND_HOST
+#define DBMP_BACKEND_HOST "bmp.musanet.xyz"
+#endif
+
 namespace dbmp {
 
-inline std::string _host(const char* fallback) {
+inline std::string _host() {
     const char* env = std::getenv("BMP_BACKEND_HOST");
     if (env && env[0] != '\0') {
         return std::string("https://") + env;
     }
-    return std::string("https://") + fallback;
+    return std::string("https://") DBMP_BACKEND_HOST;
 }
 
-inline std::string backend_url() { return _host("backend.beammp.com"); }
-inline std::string auth_url()    { return _host("auth.beammp.com"); }
+inline std::string backend_url() { return _host(); }
+inline std::string auth_url()    { return _host(); }
 
 } // namespace dbmp
 HEADER
