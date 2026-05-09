@@ -25,7 +25,6 @@
 #   BUILDS_RELEASE_TAG         — default binaries-latest
 #   BUILDS_SERVER_LINUX_URL    — override single artifact URL
 #   BUILDS_SERVER_WINDOWS_URL  — override single artifact URL
-#   BUILDS_LAUNCHER_URL        — override single artifact URL
 #   BUILDS_CLIENT_URL          — override single artifact URL
 #   BUILDS_FORCE_REFETCH=1     — re-download even if file already on disk
 #   BUILDS_SKIP_HOST_PATCH=1   — fetch unmodified (debug only)
@@ -63,7 +62,6 @@ RELEASE_BASE="https://github.com/${RELEASE_REPO}/releases/download/${RELEASE_TAG
 CLIENT_URL="${BUILDS_CLIENT_URL:-https://github.com/BeamMP/BeamMP/releases/latest/download/BeamMP.zip}"
 SERVER_LIN_URL="${BUILDS_SERVER_LINUX_URL:-${RELEASE_BASE}/BeamMP-Server.debian.12.x86_64}"
 SERVER_WIN_URL="${BUILDS_SERVER_WINDOWS_URL:-${RELEASE_BASE}/BeamMP-Server.exe}"
-LAUNCHER_URL="${BUILDS_LAUNCHER_URL:-${RELEASE_BASE}/BeamMP-Launcher.exe}"
 
 fetch() {
   local url="$1" dest="$2"
@@ -124,12 +122,10 @@ PY
 
 fetch "${SERVER_LIN_URL}" "${BUILDS_DIR}/BeamMP-Server.debian.12.x86_64" || true
 fetch "${SERVER_WIN_URL}" "${BUILDS_DIR}/BeamMP-Server.exe"               || true
-fetch "${LAUNCHER_URL}"   "${BUILDS_DIR}/BeamMP-Launcher.exe"             || true
 fetch "${CLIENT_URL}"     "${BUILDS_DIR}/BeamMP.zip"                      || true
 
 patch_host "${BUILDS_DIR}/BeamMP-Server.debian.12.x86_64"
 patch_host "${BUILDS_DIR}/BeamMP-Server.exe"
-patch_host "${BUILDS_DIR}/BeamMP-Launcher.exe"
 
 if [[ -s "${BUILDS_DIR}/BeamMP-Server.debian.12.x86_64" ]]; then
   chmod +x "${BUILDS_DIR}/BeamMP-Server.debian.12.x86_64"
