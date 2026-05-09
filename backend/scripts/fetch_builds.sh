@@ -81,8 +81,13 @@ fetch() {
 }
 
 # Stamp HOST into the 256-byte sentinel-led slot inside a patched binary.
-# Tolerant: if the sentinel isn't found (e.g. someone substituted the
-# vanilla upstream binary), the file is left untouched and we move on.
+# STRICT: if the sentinel isn't found, the binary cannot be safely served
+# (it would target whatever upstream backend was hard-coded at build time
+# instead of THIS deployment), so we delete it and fail loudly. The
+# operator must wait for a corrected CI build. This refuses to ship a
+# binary that would silently send heartbeats to BeamMP's real backend
+# and produce "Backend failed to respond to a heartbeat" for every
+# operator who downloads from /builds/.
 patch_host() {
   local path="$1"
   if [[ "${BUILDS_SKIP_HOST_PATCH:-0}" == "1" ]]; then return 0; fi
@@ -111,12 +116,19 @@ while True:
     start = idx + 256
 
 if hits == 0:
-    print(f'[fetch_builds] WARN no DBMP host sentinel in {target.name} — '
-          'serving as-is (binary may be vanilla or built from older patches)',
-          file=sys.stderr)
-else:
-    target.write_bytes(bytes(data))
-    print(f'[fetch_builds] stamped {target.name} -> {sys.argv[2]} ({hits} site{"s" if hits != 1 else ""})')
+    # FATAL: this binary would heartbeat to backend.beammp.com instead
+    # of the local deployment. Delete it so the /builds/ route 404s
+    # rather than handing operators a binary that silently fails.
+    target.unlink(missing_ok=True)
+    raise SystemExit(
+        f'[fetch_builds] FATAL: no DBMP host sentinel in {target.name}. '
+        f'The CI build did not embed the deploy-time host slot (likely '
+        f'dead-code-elimination -- ensure patches/apply-server-patch.sh '
+        f'marks the blob volatile + used,retain). Refusing to serve an '
+        f'un-stampable binary; deleted {target} so /builds/ returns 404.'
+    )
+target.write_bytes(bytes(data))
+print(f'[fetch_builds] stamped {target.name} -> {sys.argv[2]} ({hits} site{"s" if hits != 1 else ""})')
 PY
 }
 
