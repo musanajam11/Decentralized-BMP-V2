@@ -209,8 +209,9 @@ jobs:
           vanilla \`backend.beammp.com\` infra."
 
           # Delete and recreate so assets always reflect the most recent run.
-          gh release delete "${tag}" --yes --cleanup-tag || true
+          gh release delete "${tag}" --yes --cleanup-tag --repo "${GITHUB_REPOSITORY}" || true
           gh release create "${tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --prerelease \
             --title "Patched BeamMP-Server binaries (rolling)" \
             --notes "${notes}" \
